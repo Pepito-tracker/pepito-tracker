@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>⛵ Pepito — Suivi en direct</title>
+
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: #071a2f;
+      color: #fff;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Header ── */
+    header {
+      background: #0d2137;
+      border-bottom: 2px solid #1d436d;
+      padding: 14px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    .header-left { display: flex; align-items: center; gap: 12px; }
+    .boat-icon { font-size: 2rem; }
+    .boat-name { font-size: 1.5rem; font-weight: 700; }
+    .subtitle  { font-size: 0.85rem; color: #9db3c7; margin-top: 2px; }
+    #status-badge {
+      padding: 6px 14px;
+      border-radius: 20px;
+      font-size: 0.85rem;
+      font-weight: 700;
+    }
+    .online  { background: #1a4a2e; color: #2ecc71; border: 1px solid #2ecc71; }
+    .offline { background: #3a1a1a; color: #e74c3c; border: 1px solid #e74c3c; }
+
+    /* ── Dashboard ── */
+    .dashboard {
+      display: flex;
+      gap: 10px;
+      padding: 14px 20px;
+      background: #0f2744;
+      border-bottom: 1px solid #1d436d;
+      flex-wrap: wrap;
+    }
+    .card {
+      background: #102844;
+      border: 1px solid #1d436d;
+      border-radius: 8px;
+      padding: 10px 18px;
+      min-width: 130px;
+      flex: 1;
+    }
+    .card-label {
+      font-size: 0.72rem;
+      font-weight: 700;
+      color: #9db3c7;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 4px;
+    }
+    .card-value {
+      font-size: 1.4rem;
+      font-weight: 700;
+      color: #f4f7fb;
+    }
+    .card-value.accent { color: #35c2ff; }
+
+    /* ── Carte ── */
+    #map {
+      flex: 1;
+      min-height: 420px;
+    }
+
+    /* ── Footer ── */
+    footer {
+      background: #0d2137;
+      border-top: 1px solid #1d436d;
+      padding: 10px 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 8px;
+      font-size: 0.8rem;
+      color: #5f7388;
+    }
+    #last-update { color: #9db3c7; }
+
+    /* ── Responsive ── */
+    @media (max-width: 600px) {
+      .card { min-width: calc(50% - 10px); }
+      .boat-name { font-size: 1.2rem; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- Header -->
+<header>
+  <div class="header-left">
+    <span class="boat-icon">⛵</span>
+    <div>
+      <div class="boat-name" id="boat-name">{{ boat_name }}</div>
+      <div class="subtitle">Suivi de navigation en direct</div>
+    </div>
+  </div>
+  <div id="status-badge" class="offline">⚫ Hors ligne</div>
+</header>
+
+<!-- Dashboard -->
+<div class="dashboard">
+  <div class="card">
+    <div class="card-label">Vitesse</div>
+    <div class="card-value accent" id="speed">— nds</div>
+  </div>
+  <div class="card">
+    <div class="card-label">Cap</div>
+    <div class="card-value" id="cap">—°</div>
+  </div>
+  <div class="card">
+    <div class="card-label">Distance</div>
+    <div class="card-value" id="distance">— NM</div>
+  </div>
+  <div class="card">
+    <div class="card-label">Moteur</div>
+    <div class="card-value" id="engine">— h</div>
+  </div>
+  <div class="card">
+    <div class="card-label">Voile</div>
+    <div class="card-value" id="sail">— h</div>
+  </div>
+</div>
+
+<!-- Carte -->
+<div id="map"></div>
+
+<!-- Footer -->
+<footer>
+  <span>Journal de Bord Navigation v2.0.0</span>
+  <span id="last-update">Dernière mise à jour : —</span>
+  <span>🌍 OpenStreetMap</span>
+</footer>
+
+<!-- Leaflet JS -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+
+<script>
+  // ── Initialisation carte ──────────────────────────────────
+  const map = L.map('map', { zoomControl: true }).setView([46.49, -1.81], 7);
+
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© <a href="https://openstreetmap.org">OpenStreetMap</a>',
+    maxZoom: 18
+  }).addTo(map);
+
+  // Icône bateau personnalisée
+  const boatIcon = L.divIcon({
+    html: '<div style="font-size:28px;line-height:1;filter:drop-shadow(0 2px 4px rgba(0,0,0,0.5))">⛵</div>',
+    className: '',
+    iconAnchor: [14, 14]
+  });
+
+  let marker   = null;
+  let polyline = L.polyline([], { color: '#35c2ff', weight: 3, opacity: 0.8 }).addTo(map);
+  let firstPosition = true;
+
+  // ── Mise à jour de l'interface ────────────────────────────
+  function updateUI(data) {
+    // Statut en ligne
+    const badge = document.getElementById('status-badge');
+    if (data.online) {
+      badge.textContent = '🟢 En ligne';
+      badge.className = 'online';
+    } else {
+      badge.textContent = '⚫ Hors ligne';
+      badge.className = 'offline';
+    }
+
+    // Nom bateau
+    if (data.boat_name) {
+      document.getElementById('boat-name').textContent = data.boat_name;
+      document.title = `⛵ ${data.boat_name} — Suivi en direct`;
+    }
+
+    // Dashboard
+    document.getElementById('speed').textContent =
+      data.speed != null ? `${parseFloat(data.speed).toFixed(1)} nds` : '— nds';
+    document.getElementById('cap').textContent =
+      data.cap != null ? `${data.cap}°` : '—°';
+    document.getElementById('distance').textContent =
+      data.distance != null ? `${parseFloat(data.distance).toFixed(2)} NM` : '— NM';
+    document.getElementById('engine').textContent = data.engine || '— h';
+    document.getElementById('sail').textContent   = data.sail   || '— h';
+
+    // Dernière update
+    document.getElementById('last-update').textContent =
+      data.last_update ? `Dernière mise à jour : ${data.last_update}` : 'Aucune donnée';
+
+    // Carte — trace
+    if (data.trace && data.trace.length > 0) {
+      polyline.setLatLngs(data.trace);
+
+      // Position actuelle
+      const pos = [data.lat, data.lon];
+      if (marker) {
+        marker.setLatLng(pos);
+      } else {
+        marker = L.marker(pos, { icon: boatIcon })
+          .addTo(map)
+          .bindPopup(`<b>${data.boat_name}</b><br>${parseFloat(data.speed).toFixed(1)} nds — ${data.cap}°`);
+      }
+      marker.getPopup().setContent(
+        `<b>${data.boat_name}</b><br>` +
+        `${parseFloat(data.speed || 0).toFixed(1)} nds — Cap ${data.cap || '—'}°<br>` +
+        `Distance : ${parseFloat(data.distance || 0).toFixed(2)} NM`
+      );
+
+      // Centrer sur la position au premier chargement
+      if (firstPosition) {
+        map.setView(pos, 10);
+        firstPosition = false;
+      }
+    }
+  }
+
+  // ── Polling toutes les 15 secondes ───────────────────────
+  async function fetchData() {
+    try {
+      const res  = await fetch('/data');
+      const data = await res.json();
+      updateUI(data);
+    } catch (err) {
+      console.warn('Erreur fetch:', err);
+    }
+  }
+
+  fetchData();
+  setInterval(fetchData, 15000);
+</script>
+
+</body>
+</html>
